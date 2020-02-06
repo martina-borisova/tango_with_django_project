@@ -1,11 +1,122 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from rango.models import Category, Page
-from rango.forms import CategoryForm
-from rango.forms import PageForm
-from django.shortcuts import redirect
+from rango.forms import CategoryForm, PageForm, UserForm, UserProfileForm
 from django.urls import reverse
+from django.contrib.auth import authenticate, login, logout
+from django.http import HttpResponse
+from django.contrib.auth.decorators import login_required
 
+
+@login_required
+def restricted(request):
+    context_dict = {}
+    # Construct a dictionary to pass to the template engine as its context.
+    # Note the key boldmessage matches to {{ message }} in the template!
+    context_dict['message'] = "Since you're logged in, you can see this text!"
     
+    return render(request, 'rango/restricted.html', context=context_dict)
+
+
+def register(request):
+    # A boolean value for telling the template
+    # whether the registration was successful.
+    # Set to False initially. Code changes value to
+    # True when registration succeeds.
+    registered = False
+     
+    #If it's POST, process input data
+    if request.method == 'POST':
+        #Attempt to grab information from the row form info
+        user_form = UserForm(request.POST)
+        profile_form = UserProfileForm(request.POST)
+         
+        #check validity
+        if user_form.is_valid() and profile_form.is_valid():
+            user = user_form.save()
+             
+            #set_password hashes the password
+            user.set_password(user.password)
+            user.save()
+             
+            # For the UserProfile instance
+            # We need to set the user attribute ourselves, hence set commit= False
+            # This delays saving the model until integrity issues are avoided
+            profile = profile_form.save(commit=False)
+            profile.user = user
+             
+            if 'picture' in request.FILES:
+                profile.picture = request.FILES['picture']
+                 
+            profile.save()
+            
+            registered = True
+        else:
+            print(user_form.errors, profile_form.errors)
+    else:
+        # Not a POST, thus render the form using two ModelForm instances
+        # These forms will be blank, ready for user input
+        user_form = UserForm()
+        profile_form = UserProfileForm()
+    
+    # Render the template depending on the context
+    return render(request,
+                  'rango/register.html',
+                  context= {'user_form' : user_form,
+                            'profile_form' : profile_form,
+                            'registered' : registered})
+    
+def user_login(request):
+    # If the request is a HTTP POST, try to pull out the relevant information.
+    if request.method == 'POST':
+        # Gather the username and password provided by the user.
+        # This information is obtained from the login form.
+        # We use request.POST.get('<variable>') as opposed
+        # to request.POST['<variable>'], because the
+        # request.POST.get('<variable>') returns None if the
+        # value does not exist, while request.POST['<variable>']
+        # will raise a KeyError exception.
+        username = request.POST.get('username')
+        password = request.POST.get('password')
+        
+        # Use Django's machinery to attempt to see if the username/password
+        # combination is valid - a User object is returned if it is.
+        user = authenticate(username=username, password=password)
+        # If we have a User object, the details are correct.
+        # If None (Python's way of representing the absence of a value), 
+        # no user with matching credentials was found.
+        if user:
+            # Is the account active? It could have been disabled.
+            if user.is_active:
+                # If the account is valid and active, we can log the user in.
+                # We'll send the user back to the homepage.
+                login(request, user)
+                return redirect(reverse('rango:index'))
+            else:
+                # An inactive account was used - no logging in!
+                return HttpResponse("Your Rango account is disabled.")
+            
+        else:
+            # Bad login details were provided. So we can't log the user in.
+            print(f"Invalid login details: {username}, {password}")
+            return HttpResponse("Invalid login details supplied.")
+        
+    # The request is not a HTTP POST, so display the login form.
+    # This scenario would most likely be a HTTP GET.
+    else:
+        # No context variables to pass to the template system, hence the
+        # blank dictionary object...
+        return render(request, 'rango/login.html')
+
+# Use the login_required() decorator to ensure only those logged in can
+# access the view.
+@login_required
+def user_logout(request):
+    # Since we know the user is logged in, we can now just log them out.
+    logout(request)
+    # Take the user back to the homepage.
+    return redirect(reverse('rango:index'))
+
+
 def index(request):
     # Query the database for a list of ALL categories currently stored.
     # Order the categories by the number of likes in descending order.
@@ -65,6 +176,7 @@ def show_category(request, category_name_slug):
     # Go render the response and return it to the client.
     return render(request, 'rango/category.html', context=context_dict)
 
+@login_required
 def add_category(request):
     form = CategoryForm()
     
@@ -84,7 +196,7 @@ def add_category(request):
     # Render the form with error messages (if any).
     return render(request, 'rango/add_category.html', {'form': form})
 
-
+@login_required
 def add_page(request, category_name_slug):
     try:
         category = Category.objects.get(slug=category_name_slug)
@@ -114,6 +226,8 @@ def add_page(request, category_name_slug):
             
     context_dict = {'form': form, 'category': category}
     return render(request, 'rango/add_page.html', context=context_dict)
+
+
             
             
             
